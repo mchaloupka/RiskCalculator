@@ -1,6 +1,8 @@
-# Fable Minimal App
+# RISK Calculator
 
-This is a small Fable app project so you can easily get started and add your own code easily in it.
+This is a small Fable app project that calculates RISK game odds given attacker and defenders units.
+
+See it in action: https://mchaloupka.github.io/RiskCalculator/
 
 ## Requirements
 
@@ -15,6 +17,11 @@ This is a small Fable app project so you can easily get started and add your own
 * After the first compilation is finished, in your browser open: http://localhost:8080/
 
 Any modification you do to the F# code will be reflected in the web page after saving.
+
+## Checking in changes
+
+* Compile: `npm run build`
+* Commit and push changes
 
 ## Project structure
 
@@ -32,4 +39,4 @@ The sample only contains two F# files: the project (.fsproj) and a source file (
 
 ### Web assets
 
-The `index.html` file and other assets like an icon can be found in the `public` folder.
+The `index.html` file and other assets like an icon can be found in the `docs` folder.
