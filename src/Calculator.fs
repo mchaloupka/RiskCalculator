@@ -1,8 +1,9 @@
 namespace RiskCalculator
 
-type State = { Attacker: int; Defender: int }
-type StateProbability = { Probability: float; Outcome: State }
-type Probabilities = StateProbability list
+open System.Collections.Generic
+
+open RiskCalculator
+open RiskCalculator.JsUtil
 
 module Calculator =
     let rec private generateThrownNumbers throwCount =
@@ -38,41 +39,40 @@ module Calculator =
                 (attO + 1, defO)
 
     let private aggregateStates outputs =
-            let rec aggregate output toProcess =
-                match toProcess with
-                | (state, probability) :: xs ->
-                    let attackerOutput =
-                        output
-                        |> Map.tryFind state.Attacker
-                        |> Option.defaultValue Map.empty
+        let rec aggregate (output: IDictionary<int, IDictionary<int, float>>) toProcess =
+            match toProcess with
+            | (state, probability) :: xs ->
+                let attackerOutput =
+                    match output.TryGetValue state.Attacker with
+                    | true, x -> x
+                    | false, _ ->
+                        let x = Seq.empty |> dict
+                        output.[state.Attacker] <- x
+                        x
 
-                    let defenderOutput =
-                        attackerOutput
-                        |> Map.tryFind state.Defender
-                        |> Option.defaultValue 0.0
+                let defenderOutput =
+                    match attackerOutput.TryGetValue state.Defender with
+                    | true, x -> x
+                    | false, _ -> 0.0
 
-                    let newDefenderOutput = defenderOutput + probability
-                    let newAttackerOutput =
-                        attackerOutput
-                        |> Map.add state.Defender newDefenderOutput
-                   
-                    output
-                    |> Map.add state.Attacker newAttackerOutput
-                    |> aggregate <| xs
-                | _ -> output
-            
-            outputs
-            |> aggregate Map.empty
-            |> Map.toList
-            |> List.collect (
-                fun (attacker, attackerMap) ->
-                    attackerMap
-                    |> Map.toList
-                    |> List.map (
-                        fun (defender, probability) ->
-                            { Outcome = { Attacker = attacker; Defender = defender }; Probability = probability }
-                    )
-            )
+                attackerOutput.[state.Defender] <- defenderOutput + probability
+
+                aggregate output xs
+
+            | _ -> output
+        
+        outputs
+        |> aggregate (Seq.empty |> dict)
+        |> dictToArray
+        |> Array.collect (
+            fun (attacker, attackerMap) ->
+                attackerMap
+                |> dictToArray
+                |> Array.map (
+                    fun (defender, probability) ->
+                        { Outcome = { Attacker = attacker; Defender = defender }; Probability = probability }
+                )
+        )
 
     let private generatePossibleOutcome attackerThrowCounts defenderThrowCounts =
         let attackerThrows = attackerThrowCounts |> generateThrownNumbers
@@ -110,7 +110,7 @@ module Calculator =
             if state.Defender > 1 then 2 else 1
 
         possibleOutcomes.[attackerThrows].[defenderThrows]
-        |> List.map (
+        |> Array.map (
             fun probability ->
                 { 
                     Outcome = { 
@@ -120,3 +120,68 @@ module Calculator =
                     Probability = probability.Probability
                 }
         )
+
+    let calculateProbabilities finalState =
+        if finalState.Attacker < 2 then
+            sprintf "Cannot attack with %d units" finalState.Attacker
+            |> invalidOp
+        elif finalState.Defender < 1 then
+            sprintf "Cannot defend with %d units" finalState.Defender
+            |> invalidOp
+        else
+            let initialStates =
+                [
+                    [ 1..finalState.Attacker ] |> List.map (fun x -> { Attacker = x; Defender = 0 })
+                    [ 1..finalState.Defender ] |> List.map (fun x -> { Attacker = 1; Defender = x })
+                ]
+                |> List.concat
+                |> List.map (fun x -> x, { Probability = 1.0; Outcome = x } |> Array.singleton)
+                |> Cache.build
+
+            let rec buildUntilFinalState (calculated: Cache) statesToBuild =
+                match statesToBuild with
+                | [] -> "Failed to find a way to the end result" |> invalidOp
+                | x :: xs ->
+                    match calculated |> Cache.tryGetValue x with
+                    | Some result ->
+                        if x = finalState then
+                            result
+                        else
+                            buildUntilFinalState calculated xs
+                    | None ->
+                        let probabilities =
+                            probabilitiesForState x
+                            |> Array.map (
+                                fun probability ->
+                                    probability.Outcome, probability.Probability, calculated |> Cache.tryGetValue probability.Outcome
+                            )
+
+                        let calculationMissing =
+                            probabilities
+                            |> Array.choose (
+                                function
+                                | state, _, None ->
+                                    Some state
+                                | _ ->
+                                    None
+                            )
+
+                        if calculationMissing |> Array.isEmpty then
+                            probabilities
+                            |> Array.collect (
+                                function
+                                | _, prob, Some(outcomes) ->
+                                    outcomes
+                                    |> Array.map (fun outcome -> outcome.Outcome, outcome.Probability * prob)
+                                | _ ->
+                                    Array.empty
+                            )
+                            |> Array.toList
+                            |> aggregateStates
+                            |> Cache.add x <| calculated
+                            |> buildUntilFinalState <| x :: xs
+                        else
+                            (calculationMissing |> Array.toList) @ (x :: xs)
+                            |> buildUntilFinalState calculated
+
+            buildUntilFinalState initialStates [ finalState ]
